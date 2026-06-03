@@ -70,6 +70,19 @@ function App() {
         }
       } else {
         // Standard Download
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile && navigator.canShare) {
+            // Force share if mobile and can share, even if they clicked download
+            const pdfBlob = await html2pdf().set(opt).from(element).output('blob');
+            const file = new File([pdfBlob], opt.filename, { type: 'application/pdf' });
+            if (navigator.canShare({ files: [file] })) {
+                await navigator.share({
+                    title: 'Договор SENIMDI',
+                    files: [file]
+                });
+                return;
+            }
+        }
         await html2pdf().set(opt).from(element).save();
       }
     } catch (error) {

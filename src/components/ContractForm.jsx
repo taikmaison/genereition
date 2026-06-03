@@ -16,13 +16,27 @@ export default function ContractForm({ formData, setFormData, onGenerate, isGene
 
   const handlePhoneChange = (e) => {
     let val = e.target.value.replace(/\D/g, '');
-    if (val.startsWith('7')) val = val.substring(1);
     
-    let formatted = '+7 ';
-    if (val.length > 0) formatted += `(${val.substring(0, 3)}`;
-    if (val.length >= 4) formatted += `) ${val.substring(3, 6)}`;
-    if (val.length >= 7) formatted += `-${val.substring(6, 8)}`;
-    if (val.length >= 9) formatted += `-${val.substring(8, 10)}`;
+    // If user pastes a full number with country code (11 digits starting with 7 or 8)
+    if (val.length === 11 && (val.startsWith('7') || val.startsWith('8'))) {
+      val = val.substring(1);
+    } else if (val.length > 10) {
+      val = val.substring(0, 10);
+    }
+    
+    let formatted = '+7';
+    if (val.length > 0) {
+      formatted += ' (' + val.substring(0, 3);
+    }
+    if (val.length >= 4) {
+      formatted += ') ' + val.substring(3, 6);
+    }
+    if (val.length >= 7) {
+      formatted += '-' + val.substring(6, 8);
+    }
+    if (val.length >= 9) {
+      formatted += '-' + val.substring(8, 10);
+    }
     
     if (val.length === 0) formatted = '';
     
