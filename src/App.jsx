@@ -1,119 +1,148 @@
-import { useState, useRef } from 'react';
-import html2pdf from 'html2pdf.js';
+import { useRef, useState } from 'react';
 import ContractForm from './components/ContractForm';
-import ContractTemplate from './components/ContractTemplate';
+import { formatPhone, halfOf, onlyDigits, MAX_AMOUNT_DIGITS, safeFileName, todayISO } from './utils';
+import {
+  canShareFile,
+  downloadFile,
+  prefersShareForDownload,
+  shareFile,
+  SHARE_RESULT,
+  supportsShare,
+} from './pdfDelivery';
+
+const INITIAL_FORM = {
+  contractNumber: '',
+  date: todayISO(),
+  name: '',
+  iin: '',
+  idCard: '',
+  phone: '',
+  address: '',
+  pay1: '',
+  pay2: '',
+  pay3: '',
+};
+
+const normalizeAmount = (value) => onlyDigits(value, MAX_AMOUNT_DIGITS).replace(/^0+(?=\d)/, '');
+
+const pdfFileName = (data) =>
+  safeFileName(`Договор ${data.contractNumber ? `№${data.contractNumber} ` : ''}${data.name || 'Клиент'}`) + '.pdf';
 
 function App() {
-  const [formData, setFormData] = useState({
-    contractNumber: '',
-    date: new Date().toISOString().split('T')[0],
-    name: '',
-    iin: '',
-    idCard: '',
-    phone: '',
-    address: '',
-    pay1: '',
-    pay2: '',
-    pay3: '',
-    pay4: ''
-  });
+  const [formData, setFormData] = useState(INITIAL_FORM);
+  // Prepayment follows 50% of the total until the user types their own value.
+  const [prepaymentEdited, setPrepaymentEdited] = useState(false);
+  const [busy, setBusy] = useState(null); // 'download' | 'share' | null
+  const [notice, setNotice] = useState(null); // { type: 'success' | 'info' | 'error', text }
+  const [shareReadyKey, setShareReadyKey] = useState(null);
+  const pdfCache = useRef(null); // { key, file } — the last generated PDF
 
-  const [isGenerating, setIsGenerating] = useState(false);
-  const templateRef = useRef(null);
+  const formKey = JSON.stringify(formData);
+  const shareReady = shareReadyKey === formKey;
 
-  const generatePDF = async (share = false) => {
-    setIsGenerating(true);
-    const element = templateRef.current;
-    
-    const opt = {
-      margin:       [20, 15, 20, 15],
-      filename:     `Договор_${formData.name || 'Клиент'}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  {
-        scale: 2,
-        backgroundColor: '#ffffff',
-        onclone: (clonedDoc) => {
-          clonedDoc.querySelectorAll('*').forEach((node) => {
-            node.style.color = '#000000';
-            node.style.backgroundColor = 'transparent';
-            node.style.borderColor = '#000000';
-            node.style.textDecorationColor = '#000000';
-            node.style.boxShadow = 'none';
-          });
-
-          const root = clonedDoc.querySelector('[data-pdf-root="true"]');
-          if (root) {
-            root.style.backgroundColor = '#ffffff';
-          }
+  const handleFieldChange = (name, rawValue) => {
+    setNotice(null);
+    setFormData((prev) => {
+      switch (name) {
+        case 'iin':
+          return { ...prev, iin: onlyDigits(rawValue, 12) };
+        case 'phone':
+          return { ...prev, phone: formatPhone(rawValue, prev.phone) };
+        case 'pay1':
+          return { ...prev, pay1: normalizeAmount(rawValue) };
+        case 'pay2': {
+          const pay2 = normalizeAmount(rawValue);
+          return prepaymentEdited ? { ...prev, pay2 } : { ...prev, pay2, pay3: halfOf(pay2) };
         }
-      },
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak:    { mode: ['css', 'legacy'] }
-    };
-
-    try {
-      if (share && navigator.share) {
-        // Generate Blob to share
-        const pdfBlob = await html2pdf().set(opt).from(element).output('blob');
-        const file = new File([pdfBlob], opt.filename, { type: 'application/pdf' });
-        
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            title: 'Договор SENIMDI',
-            text: `Договор для ${formData.name}`,
-            files: [file]
-          });
-        } else {
-          // Fallback to download if cannot share file
-          alert('Ваш браузер не поддерживает отправку файлов. Файл будет скачан.');
-          await html2pdf().set(opt).from(element).save();
-        }
-      } else {
-        // Standard Download
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        if (isMobile && navigator.canShare) {
-            // Force share if mobile and can share, even if they clicked download
-            const pdfBlob = await html2pdf().set(opt).from(element).output('blob');
-            const file = new File([pdfBlob], opt.filename, { type: 'application/pdf' });
-            if (navigator.canShare({ files: [file] })) {
-                await navigator.share({
-                    title: 'Договор SENIMDI',
-                    files: [file]
-                });
-                return;
-            }
-        }
-        await html2pdf().set(opt).from(element).save();
+        case 'pay3':
+          return { ...prev, pay3: normalizeAmount(rawValue) };
+        default:
+          return { ...prev, [name]: rawValue };
       }
+    });
+    if (name === 'pay3') setPrepaymentEdited(normalizeAmount(rawValue) !== '');
+  };
+
+  // Generating takes a few seconds, so the result is cached until the form changes.
+  const getPdfFile = async () => {
+    if (pdfCache.current?.key === formKey) return { file: pdfCache.current.file, fresh: false };
+    const { generateContractPdf } = await import('./contract/generatePdf');
+    const blob = await generateContractPdf(formData);
+    const file = new File([blob], pdfFileName(formData), { type: 'application/pdf' });
+    pdfCache.current = { key: formKey, file };
+    return { file, fresh: true };
+  };
+
+  const share = async (file, fresh) => {
+    const result = await shareFile(file, { title: 'Договор SENIMDI', text: `Договор для ${formData.name || 'клиента'}` });
+    if (result === SHARE_RESULT.needsTap && fresh) {
+      // The browser only opens the share sheet right after a tap; the file is ready now.
+      setShareReadyKey(formKey);
+      setNotice({ type: 'info', text: 'PDF готов. Нажмите «Отправить PDF», чтобы поделиться.' });
+      return;
+    }
+    if (result === SHARE_RESULT.needsTap) {
+      downloadFile(file);
+      setNotice({ type: 'info', text: 'Браузер не разрешил отправку, поэтому PDF скачан.' });
+      return;
+    }
+    setShareReadyKey(null);
+    if (result === SHARE_RESULT.shared) setNotice({ type: 'success', text: 'PDF отправлен.' });
+  };
+
+  const run = async (kind, action) => {
+    setBusy(kind);
+    setNotice(null);
+    try {
+      await action();
     } catch (error) {
-      console.error('PDF Generation Error:', error);
-      alert('Произошла ошибка при генерации PDF');
+      console.error('PDF error:', error);
+      setNotice({ type: 'error', text: 'Не удалось создать PDF. Проверьте интернет и попробуйте ещё раз.' });
     } finally {
-      setIsGenerating(false);
+      setBusy(null);
     }
   };
 
+  const handleDownload = () =>
+    run('download', async () => {
+      const { file, fresh } = await getPdfFile();
+      if (prefersShareForDownload() && canShareFile(file)) {
+        await share(file, fresh);
+        return;
+      }
+      downloadFile(file);
+      setNotice({ type: 'success', text: `PDF скачан: ${file.name}` });
+    });
+
+  const handleShare = () =>
+    run('share', async () => {
+      const { file, fresh } = await getPdfFile();
+      if (!canShareFile(file)) {
+        downloadFile(file);
+        setNotice({ type: 'info', text: 'Этот браузер не умеет отправлять файлы, поэтому PDF скачан.' });
+        return;
+      }
+      await share(file, fresh);
+    });
+
   return (
-    <div className="relative overflow-x-hidden">
-      <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto">
-          <header className="mb-8 text-center">
-            <h1 className="text-3xl font-extrabold text-gray-900 mb-2">SENIMDI PWA</h1>
-            <p className="text-gray-500">Система генерации договоров для внутреннего использования</p>
-          </header>
+    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto">
+        <header className="mb-8 text-center">
+          <h1 className="text-3xl font-extrabold text-gray-900 mb-2">SENIMDI PWA</h1>
+          <p className="text-gray-500">Система генерации договоров для внутреннего использования</p>
+        </header>
 
-          <ContractForm 
-            formData={formData} 
-            setFormData={setFormData} 
-            onGenerate={generatePDF}
-            isGenerating={isGenerating}
-          />
-        </div>
-      </div>
-
-      {/* Hidden container for PDF generation */}
-      <div style={{ position: 'absolute', top: 0, left: 0, zIndex: -1000, opacity: 0.001, pointerEvents: 'none', width: '180mm' }}>
-        <ContractTemplate ref={templateRef} data={formData} />
+        <ContractForm
+          formData={formData}
+          onFieldChange={handleFieldChange}
+          onDownload={handleDownload}
+          onShare={handleShare}
+          busy={busy}
+          canShare={supportsShare()}
+          shareReady={shareReady}
+          notice={notice}
+        />
       </div>
     </div>
   );

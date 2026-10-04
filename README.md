@@ -1,16 +1,51 @@
-# React + Vite
+# SENIMDI — генератор договоров
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+PWA для сотрудников «SENIMDI» ЖК: заполняете данные клиента и суммы, приложение формирует
+**«Қызмет көрсету шарты»** (договор сопровождения покупки жилья в ипотеку) в PDF и отдаёт его
+на скачивание или в системное меню «Поделиться» (WhatsApp, Telegram, почта).
 
-Currently, two official plugins are available:
+- PDF векторный: текст выделяется и ищется, файл ~55 КБ, одинаковый на всех устройствах.
+- Вёрстка повторяет бумажный договор: A4, поля 22.5 / 11.8 / 17.1 / 14.3 мм, шрифт Tinos 12 pt
+  (метрически совпадает с Times New Roman), нумерация страниц со 2-й, реквизиты в таблице с местом для подписей.
+- Суммы автоматически пишутся прописью на казахском, остаток и процент предоплаты считаются сами.
+- После первого открытия работает без интернета (шрифты и генератор PDF кэшируются).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Запуск
 
-## React Compiler
+```bash
+npm install
+npm run dev:local     # разработка с hot reload: http://localhost:5173
+npm test              # юнит-тесты (vitest)
+npm run lint
+npm run build         # сборка в dist/
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+`npm run dev` / `npm start` запускают `vite preview` (раздают уже собранный `dist/`) — так настроен деплой на Render.
 
-## Expanding the ESLint configuration
+## Деплой на Render
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Если сервис создан как **Web Service**: Build Command `npm install && npm run build`, Start Command `npm start`.
+Проще и надёжнее — **Static Site**: Build Command `npm install && npm run build`, Publish Directory `dist`
+(сервер не нужен, приложение целиком работает в браузере).
+
+## Где что менять
+
+| Что | Файл |
+| --- | --- |
+| Текст договора (пункты, разделы) | `src/contract/contractDocument.js` — функция `buildSections`. Нумерация пунктов считается автоматически. |
+| Реквизиты ИП (банк, счёт, адрес, директор) | `src/contract/executor.js` |
+| Поля формы | `src/components/ContractForm.jsx`, логика полей — `src/App.jsx` (`handleFieldChange`) |
+| Суммы прописью, маска телефона, даты | `src/utils.js` |
+| Скачивание / «Поделиться» | `src/pdfDelivery.js` |
+
+После правки текста запустите `npm test` — тесты проверяют нумерацию, суммы и реквизиты.
+
+## Устройство
+
+- `src/contract/contractDocument.js` строит описание документа для [pdfmake](https://pdfmake.github.io/docs/).
+- `src/contract/generatePdf.js` лениво загружает pdfmake (~1 МБ) только при первом создании PDF и подключает шрифты из `public/fonts`.
+- Сгенерированный PDF кэшируется, пока форма не меняется: повторное «Скачать» / «Поделиться» срабатывает мгновенно.
+  Если браузер не дал открыть «Поделиться» после генерации (на телефонах это разрешено только сразу после нажатия),
+  кнопка превращается в «Отправить PDF» и отправляет готовый файл со следующего нажатия.
+
+Шрифт Tinos распространяется по лицензии SIL Open Font License 1.1 (`public/fonts/OFL.txt`).

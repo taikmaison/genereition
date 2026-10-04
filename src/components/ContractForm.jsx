@@ -1,58 +1,47 @@
-import { useEffect } from 'react';
-import { formatNumber } from '../utils';
-import { FileText, Download, Share2 } from 'lucide-react';
+import { formatNumber, getPayments, isCompletePhone, numberToKazakhWords, toAmount } from '../utils';
+import { FileText, Download, Share2, Send } from 'lucide-react';
 
-export default function ContractForm({ formData, setFormData, onGenerate, isGenerating }) {
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    
-    if (name === 'iin') {
-      setFormData(prev => ({ ...prev, [name]: value.replace(/\D/g, '').slice(0, 12) }));
-      return;
-    }
-    
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
+const inputClass =
+  'w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition';
 
-  const handlePhoneChange = (e) => {
-    let val = e.target.value.replace(/\D/g, '');
-    
-    // If user pastes a full number with country code (11 digits starting with 7 or 8)
-    if (val.length === 11 && (val.startsWith('7') || val.startsWith('8'))) {
-      val = val.substring(1);
-    } else if (val.length > 10) {
-      val = val.substring(0, 10);
-    }
-    
-    let formatted = '+7';
-    if (val.length > 0) {
-      formatted += ' (' + val.substring(0, 3);
-    }
-    if (val.length >= 4) {
-      formatted += ') ' + val.substring(3, 6);
-    }
-    if (val.length >= 7) {
-      formatted += '-' + val.substring(6, 8);
-    }
-    if (val.length >= 9) {
-      formatted += '-' + val.substring(8, 10);
-    }
-    
-    if (val.length === 0) formatted = '';
-    
-    setFormData(prev => ({ ...prev, phone: formatted }));
-  };
+function Field({ label, hint, warning, className = '', ...inputProps }) {
+  return (
+    <label className={`block ${className}`}>
+      <span className="block text-sm font-medium text-gray-700 mb-1">{label}</span>
+      <input className={inputClass} {...inputProps} />
+      {warning ? (
+        <span className="mt-1 block text-xs text-amber-700">{warning}</span>
+      ) : (
+        hint && <span className="mt-1 block text-xs text-gray-500">{hint}</span>
+      )}
+    </label>
+  );
+}
 
-  // Auto calculate pay4
-  useEffect(() => {
-    const p2 = Number(formData.pay2) || 0;
-    const p3 = Number(formData.pay3) || 0;
-    setFormData(prev => ({ ...prev, pay4: Math.max(0, p2 - p3) }));
-  }, [formData.pay2, formData.pay3, setFormData]);
+const amountHint = (value) => {
+  const amount = toAmount(value);
+  return amount === null ? null : `${numberToKazakhWords(amount)} теңге`;
+};
 
-  const handleShare = async () => {
-    onGenerate(true); // pass true for sharing
-  };
+const noticeStyles = {
+  success: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  info: 'bg-blue-50 text-blue-800 border-blue-200',
+  error: 'bg-red-50 text-red-800 border-red-200',
+};
+
+export default function ContractForm({ formData, onFieldChange, onDownload, onShare, busy, canShare, shareReady, notice }) {
+  const handleChange = (e) => onFieldChange(e.target.name, e.target.value);
+  const payments = getPayments(formData);
+
+  const iinWarning = formData.iin && formData.iin.length !== 12 ? `ИИН должен содержать 12 цифр (сейчас ${formData.iin.length})` : null;
+  const phoneWarning = formData.phone && !isCompletePhone(formData.phone) ? 'Номер введён не полностью' : null;
+
+  let prepaymentHint = amountHint(formData.pay3);
+  if (payments.prepaymentPercent !== null && payments.prepayment !== null) {
+    prepaymentHint = `${payments.prepaymentPercent}% — ${prepaymentHint}`;
+  } else if (payments.prepayment !== null && payments.total) {
+    prepaymentHint = `${prepaymentHint} · процент не целый, в договоре будет без «%»`;
+  }
 
   return (
     <div className="bg-white rounded-2xl shadow-xl overflow-hidden mb-8 border border-gray-100">
@@ -63,89 +52,45 @@ export default function ContractForm({ formData, setFormData, onGenerate, isGene
           <p className="text-blue-100 text-sm">Заполните данные для создания PDF</p>
         </div>
       </div>
-      
+
       <div className="p-6 space-y-8">
         {/* Personal Details */}
         <section>
           <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Личные данные клиента</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Номер договора</label>
-              <input 
-                type="text" 
-                name="contractNumber" 
-                placeholder="Например, 57"
-                value={formData.contractNumber} 
-                onChange={handleChange}
-                className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Дата договора</label>
-              <input 
-                type="date" 
-                name="date" 
-                value={formData.date} 
-                onChange={handleChange}
-                className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ФИО клиента</label>
-              <input 
-                type="text" 
-                name="name" 
-                placeholder="Иванов Иван Иванович"
-                value={formData.name} 
-                onChange={handleChange}
-                className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ЖСН / ИИН (12 цифр)</label>
-              <input 
-                type="number" 
-                name="iin" 
-                placeholder="123456789012"
-                value={formData.iin} 
-                onChange={handleChange}
-                className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Жеке куәлік (№ удостоверения)</label>
-              <input 
-                type="text" 
-                name="idCard" 
-                placeholder="012345678"
-                value={formData.idCard} 
-                onChange={handleChange}
-                className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Номер телефона</label>
-              <input 
-                type="text" 
-                name="phone" 
-                placeholder="+7 (7XX) XXX-XX-XX"
-                value={formData.phone} 
-                onChange={handlePhoneChange}
-                maxLength={18}
-                className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Адрес проживания</label>
-              <input 
-                type="text" 
-                name="address" 
-                placeholder="г. Шымкент, ул. Примерная, 1"
-                value={formData.address} 
-                onChange={handleChange}
-                className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              />
-            </div>
+            <Field label="Номер договора" name="contractNumber" placeholder="Например, 136" value={formData.contractNumber} onChange={handleChange} />
+            <Field label="Дата договора" type="date" name="date" value={formData.date} onChange={handleChange} />
+            <Field label="ФИО клиента" name="name" placeholder="Иванов Иван Иванович" autoComplete="off" value={formData.name} onChange={handleChange} />
+            <Field
+              label="ЖСН / ИИН (12 цифр)"
+              name="iin"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="123456789012"
+              value={formData.iin}
+              onChange={handleChange}
+              warning={iinWarning}
+            />
+            <Field label="Жеке куәлік (№ удостоверения)" name="idCard" placeholder="012345678" autoComplete="off" value={formData.idCard} onChange={handleChange} />
+            <Field
+              label="Номер телефона"
+              type="tel"
+              name="phone"
+              inputMode="tel"
+              autoComplete="off"
+              placeholder="+7 (7XX) XXX-XX-XX"
+              value={formData.phone}
+              onChange={handleChange}
+              warning={phoneWarning}
+            />
+            <Field
+              className="md:col-span-2"
+              label="Адрес проживания"
+              name="address"
+              placeholder="г. Шымкент, ул. Примерная, 1"
+              value={formData.address}
+              onChange={handleChange}
+            />
           </div>
         </section>
 
@@ -153,67 +98,81 @@ export default function ContractForm({ formData, setFormData, onGenerate, isGene
         <section>
           <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">Финансовые условия (в тенге)</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field
+              label="Алдын ала кеңес беру ақысы (Консультация)"
+              name="pay1"
+              inputMode="numeric"
+              value={formatNumber(formData.pay1)}
+              onChange={handleChange}
+              hint={amountHint(formData.pay1)}
+            />
+            <Field
+              label="Қызмет көрсету ақысы (Общая стоимость)"
+              name="pay2"
+              inputMode="numeric"
+              value={formatNumber(formData.pay2)}
+              onChange={handleChange}
+              hint={amountHint(formData.pay2)}
+            />
+            <Field
+              label="Алдын-ала төлем (Предоплата, по умолчанию 50%)"
+              name="pay3"
+              inputMode="numeric"
+              value={formatNumber(formData.pay3)}
+              onChange={handleChange}
+              hint={prepaymentHint}
+              warning={payments.prepaymentExceedsTotal ? 'Предоплата больше общей стоимости' : null}
+            />
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Алдын ала кеңес беру ақысы (Консультация)</label>
-              <input 
-                type="number" 
-                name="pay1" 
-                value={formData.pay1} 
-                onChange={handleChange}
-                className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Қызмет көрсету ақысы (Общая стоимость)</label>
-              <input 
-                type="number" 
-                name="pay2" 
-                value={formData.pay2} 
-                onChange={handleChange}
-                className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Алдын-ала төлем (Предоплата)</label>
-              <input 
-                type="number" 
-                name="pay3" 
-                value={formData.pay3} 
-                onChange={handleChange}
-                className="w-full px-4 py-3 text-base border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Қалған төлем (Остаток)</label>
-              <div className="w-full px-4 py-2 bg-gray-100 border border-gray-300 rounded-lg font-semibold text-gray-700">
-                {formatNumber(formData.pay4) || '0'} ₸
+              <span className="block text-sm font-medium text-gray-700 mb-1">Қалған төлем (Остаток)</span>
+              <div className="w-full px-4 py-3 bg-gray-100 border border-gray-300 rounded-lg font-semibold text-gray-700" data-testid="remainder">
+                {formatNumber(payments.remainder ?? 0)} ₸
               </div>
+              {payments.remainder !== null && (
+                <span className="mt-1 block text-xs text-gray-500">{numberToKazakhWords(payments.remainder)} теңге</span>
+              )}
             </div>
           </div>
         </section>
 
         {/* Actions */}
-        <div className="pt-4 flex flex-col sm:flex-row gap-3">
-          <button 
-            onClick={() => onGenerate(false)}
-            disabled={isGenerating}
-            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {isGenerating ? (
-              <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent"></div>
-            ) : (
-              <><Download size={20} /> Скачать PDF</>
-            )}
-          </button>
-
-          {navigator.share && (
-            <button 
-              onClick={handleShare}
-              disabled={isGenerating}
-              className="sm:w-auto w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+        <div className="pt-4 space-y-3">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={onDownload}
+              disabled={busy !== null}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              <Share2 size={20} /> Поделиться
+              {busy === 'download' ? (
+                <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent"></div>
+              ) : (
+                <><Download size={20} /> Скачать PDF</>
+              )}
             </button>
+
+            {canShare && (
+              <button
+                type="button"
+                onClick={onShare}
+                disabled={busy !== null}
+                className="sm:w-auto w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:shadow-xl transition-all flex justify-center items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                {busy === 'share' ? (
+                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent"></div>
+                ) : shareReady ? (
+                  <><Send size={20} /> Отправить PDF</>
+                ) : (
+                  <><Share2 size={20} /> Поделиться</>
+                )}
+              </button>
+            )}
+          </div>
+
+          {notice && (
+            <p role="status" className={`text-sm border rounded-lg px-4 py-2 ${noticeStyles[notice.type]}`}>
+              {notice.text}
+            </p>
           )}
         </div>
       </div>
